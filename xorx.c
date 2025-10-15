@@ -64,11 +64,16 @@ enum {
 	TILE_ARROW_WATER_N, TILE_ARROW_WATER_E, TILE_ARROW_WATER_S, TILE_ARROW_WATER_W,
 	// monster (levels)
 	TILE_MONSTER_0, TILE_MONSTER_1, TILE_MONSTER_2, TILE_MONSTER_3,
+	// player sprites
+	TILE_PLAYER_STAND, TILE_PLAYER_SHOOT, TILE_PLAYER_MAGIC, TILE_PLAYER_DEAD,
 };
 
 // define sound effects
 enum {
 	SOUND_EXPLODE,
+	SOUND_PLAYER_MOVED,
+	SOUND_PLAYER_HURT,
+	SOUND_PLAYER_DIED,
 	SOUND_MONSTER_HURT,
 	SOUND_MONSTER_DIED,
 };
@@ -146,7 +151,9 @@ static struct state_t {
 		bool paused; // flag if we are paused
 		uint8_t rand; // current game random "seed"
 		uint8_t tick; // 8-bit game tick we use for cells
-		vec_t player; // current player positiion
+		vec_t player; // current player position
+		int life; // current hitpoints
+		int ammo; // current ammunition
 		cell_t cells[MAP_ROWS][MAP_COLS]; // cells of our game world
 	} game;
 } state;
@@ -267,6 +274,12 @@ static bool visible(const vec_t v) {
 	return veq(vbase(v), vbase(state.game.player));
 }
 
+// nearby checks if two vectors are nearby
+static bool nearby(const vec_t a, const vec_t b, const int range) {
+	const vec_t delta = vsub(a, b);
+	return (abs(delta.x) <= range) && (abs(delta.y) <= range);
+}
+
 // get a cell from the world
 static cell_t get(const vec_t v) {
 	return inside(v) ? state.game.cells[v.y][v.x] : (cell_t){}; // FIXME: return solid cell when outside
@@ -284,7 +297,7 @@ static void clear(const vec_t v) {
 
 // shape will shape a cell with tile and given ticks to activate again
 static void shape(const vec_t v, const uint8_t tile, const uint8_t ticks) {
-	put(v, (cell_t){ .tile = tile, .tick = ticks });
+	put(v, (cell_t){ .tile = tile, .tick = state.game.tick + ticks });
 }
 
 // explode a cell
@@ -293,8 +306,43 @@ static void explode(const vec_t v) {
 	sound(SOUND_EXPLODE);
 }
 
+// return random direction
+static dir_t random_dir(void) {
+	return DIR_NORTH+rnd()%4;
+}
+
+// return direction based on player input
+static dir_t input_dir(void) {
+	if (btn(BUTTON_UP)) return DIR_NORTH;
+	if (btn(BUTTON_DOWN)) return DIR_SOUTH;
+	if (btn(BUTTON_LEFT)) return DIR_WEST;
+	if (btn(BUTTON_RIGHT)) return DIR_EAST;
+	return DIR_NONE;
+}
+
+// return direction to walk from src -> dst
+static dir_t chase_dir(const vec_t src, const vec_t dst) {
+	vec_t delta = vsub(dst, src);
+	if (delta.x && delta.y) { if (rnd()%2) delta.x = 0; else delta.y = 0; }
+	if (delta.x < 0) return DIR_WEST;
+	if (delta.x > 0) return DIR_EAST;
+	if (delta.y < 0) return DIR_NORTH;
+	if (delta.y > 0) return DIR_SOUTH;
+	return DIR_NONE;
+}
+
 
 //==[[ Gameplay Routines ]]=============================================================================================
+
+// hurt will hurt the player
+static void hurt(void) {
+	if ((state.game.life -= 10) > 0) {
+		sound(SOUND_PLAYER_HURT);
+	} else {
+		shape(state.game.player, TILE_PLAYER_DEAD, 0);
+		sound(SOUND_PLAYER_DIED);
+	}
+}
 
 // handle flying arrows
 static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
@@ -329,11 +377,37 @@ static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
 	}
 }
 
+// update monster
+static void update_monster(const vec_t src, const uint8_t tile) {
+	const dir_t dir = nearby(src, state.game.player, 5) ? chase_dir(src, state.game.player) : random_dir();
+	const vec_t dst = vmove(src, dir);
+	clear(src);
+	switch (get(dst).tile) {
+		case TILE_EMPTY:
+			shape(dst, tile, 20+rnd()%4);
+			break;
+		case TILE_PLAYER_STAND:
+		case TILE_PLAYER_SHOOT:
+		case TILE_PLAYER_MAGIC:
+			hurt();
+			explode(src);
+			break;
+		default:
+			shape(src, tile, 20+rnd()%4);
+			break;
+	}
+}
+
 // handle single cell
 static void update_cell(const vec_t v) {
 	const cell_t cell = get(v);
 	if (cell.tick != state.game.tick) return;
 	switch (cell.tile) {
+		// handle monsters
+		case TILE_MONSTER_0: update_monster(v, TILE_MONSTER_0); break;
+		case TILE_MONSTER_1: update_monster(v, TILE_MONSTER_1); break;
+		case TILE_MONSTER_2: update_monster(v, TILE_MONSTER_2); break;
+		case TILE_MONSTER_3: update_monster(v, TILE_MONSTER_3); break;
 		// handle flying arrows
 		case TILE_ARROW_N: update_arrow(v, DIR_NORTH, false); break;
 		case TILE_ARROW_E: update_arrow(v, DIR_EAST, false); break;
