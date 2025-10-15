@@ -57,8 +57,9 @@ enum {
 	TILE_TREE_0, TILE_TREE_1, TILE_GRASS_0, TILE_GRASS_1,
 	// liquid tiles
 	TILE_WATER_0, TILE_WATER_1, TILE_LAVA_0, TILE_LAVA_1,
-	// explosion cycles
+	// explosion + spawn cycles
 	TILE_EXPLOSION_0, TILE_EXPLOSION_1, TILE_EXPLOSION_2, TILE_EXPLOSION_3,
+	TILE_SPAWN_0, TILE_SPAWN_1, TILE_SPAWN_2, TILE_SPAWN_3,
 	// flying arrows (air + water)
 	TILE_ARROW_N, TILE_ARROW_E, TILE_ARROW_S, TILE_ARROW_W,
 	TILE_ARROW_WATER_N, TILE_ARROW_WATER_E, TILE_ARROW_WATER_S, TILE_ARROW_WATER_W,
@@ -71,6 +72,9 @@ enum {
 // define sound effects
 enum {
 	SOUND_EXPLODE,
+	SOUND_SPAWN,
+	SOUND_SHOOT,
+	SOUND_ARROW_HIT,
 	SOUND_PLAYER_MOVED,
 	SOUND_PLAYER_HURT,
 	SOUND_PLAYER_DIED,
@@ -344,6 +348,28 @@ static void hurt(void) {
 	}
 }
 
+// try to move the player in direction
+static bool try_move_player(const vec_t src, const dir_t dir) {
+	const vec_t dst = vmove(src, dir);
+	switch (get(dst).tile) {
+		case TILE_EMPTY:
+			return true;
+		case TILE_GRASS_0:
+		case TILE_GRASS_1:
+			explode(dst);
+			return false;
+		case TILE_MONSTER_0:
+		case TILE_MONSTER_1:
+		case TILE_MONSTER_2:
+		case TILE_MONSTER_3:
+			hurt();
+			explode(dst);
+			return false;
+		default:
+			return false;
+	}
+}
+
 // handle flying arrows
 static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
 	if (water) shape(src, TILE_WATER_0+rnd()%2, 4+rnd()%4); else clear(src);
@@ -374,6 +400,9 @@ static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
 			put(dst, (cell_t){ .tile = cell.tile - 1, .tick = cell.tick });
 			sound(SOUND_MONSTER_HURT);
 			break;
+		default:
+			sound(SOUND_ARROW_HIT);
+			break;
 	}
 }
 
@@ -398,11 +427,39 @@ static void update_monster(const vec_t src, const uint8_t tile) {
 	}
 }
 
+// update player
+static void update_player(const vec_t src) {
+	const dir_t dir = input_dir();
+	if (btn(BUTTON_A)) {
+		if (state.game.ammo > 0) {
+			update_arrow(src, dir, false);
+			shape(src, TILE_PLAYER_SHOOT, 15);
+			sound(SOUND_SHOOT);
+			state.game.ammo--;
+			return;
+		}
+	} else {
+		if (try_move_player(src, dir)) {
+			state.game.player = vmove(src, dir);
+			shape(state.game.player, TILE_PLAYER_STAND, 8);
+			sound(SOUND_PLAYER_MOVED);
+			return;
+		}
+	}
+	// we stay at the same position, and wait for input next tick
+	state.game.player = src;
+	shape(src, TILE_PLAYER_STAND, 1);
+}
+
 // handle single cell
 static void update_cell(const vec_t v) {
 	const cell_t cell = get(v);
 	if (cell.tick != state.game.tick) return;
 	switch (cell.tile) {
+		// handle player
+		case TILE_PLAYER_STAND: update_player(v); break;
+		case TILE_PLAYER_SHOOT: update_player(v); break;
+		case TILE_PLAYER_MAGIC: update_player(v); break;
 		// handle monsters
 		case TILE_MONSTER_0: update_monster(v, TILE_MONSTER_0); break;
 		case TILE_MONSTER_1: update_monster(v, TILE_MONSTER_1); break;
@@ -422,6 +479,11 @@ static void update_cell(const vec_t v) {
 		case TILE_EXPLOSION_1: shape(v, TILE_EXPLOSION_2, 2); break;
 		case TILE_EXPLOSION_2: shape(v, TILE_EXPLOSION_3, 2); break;
 		case TILE_EXPLOSION_3: clear(v); break;
+		// handle spawn cycles
+		case TILE_SPAWN_0: shape(v, TILE_SPAWN_1, 2); break;
+		case TILE_SPAWN_1: shape(v, TILE_SPAWN_2, 2); break;
+		case TILE_SPAWN_2: shape(v, TILE_SPAWN_3, 2); break;
+		case TILE_SPAWN_3: shape(v, TILE_MONSTER_0+rnd()%4, 8); break;
 		// handle liquids
 		case TILE_WATER_0: shape(v, TILE_WATER_1, 15+rnd()%8); break;
 		case TILE_WATER_1: shape(v, TILE_WATER_0, 15+rnd()%8); break;
@@ -432,13 +494,32 @@ static void update_cell(const vec_t v) {
 
 // update the whole game
 static void update_game(void) {
+	// check for pause
 	if (btnp(BUTTON_X)) state.game.paused = !state.game.paused;
 	if (state.game.paused) return;
+
+	// update the visible game world
 	const vec_t base = vbase(state.game.player);
 	for (int y = 0; y < VIEW_ROWS; ++y) {
 		for (int x = 0; x < VIEW_COLS; ++x) {
 			update_cell(vadd(base, vec2(x, y)));
 		}
+	}
+
+	// check if we have to hibernate the world
+	if (veq(base, vbase(state.game.player))) {
+		// still on same screen
+		state.game.tick++;
+	} else {
+		// crossed the screen ... hibernate all cells
+		for (int y = 0; y < VIEW_ROWS; ++y) {
+			for (int x = 0; x < VIEW_COLS; ++x) {
+				const vec_t v = vadd(base, vec2(x, y));
+				const cell_t cell = get(v);
+				put(v, (cell_t){ .tile = cell.tile, .tick = ((cell.tick + 256) - state.game.tick) % 256 });
+			}
+		}
+		state.game.tick = 0;
 	}
 }
 
