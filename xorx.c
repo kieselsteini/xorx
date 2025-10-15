@@ -166,6 +166,36 @@ static vec_t vmove(const vec_t v, const dir_t d) {
 	return vadd(v, vdir(d));
 }
 
+// check if button is down
+static bool btn(const btn_t mask) {
+	return state.input.down & mask;
+}
+
+// check if button was just pressed
+static bool btnp(const btn_t mask) {
+	return (state.input.down & (~state.input.prev)) & mask;
+}
+
+// clear the whole screen
+static void cls(void) {
+	memset(state.video.data, 0, sizeof(state.video.data));
+}
+
+// draw single tile to screen
+static void draw(const int x, const int y, const uint8_t tile) {
+	if ((x >= 0) && (x < VIDEO_COLS) && (y >= 0) && (y < VIDEO_ROWS)) state.video.data[y][x] = tile;
+}
+
+// print text to screen
+static void print(int x, const int y, const char *text) {
+	for (; *text; ++text, ++x) draw(x, y, (uint8_t)*text);
+}
+
+// play sound effect
+static void sound(const int id) {
+	if ((id >= 0) && (id < AUDIO_SOUNDS)) state.audio.playing |= 1 << id;
+}
+
 // return formatted string printf-style
 static const char *strf(const char *fmt, ...) {
 	static char buffer[1024]; va_list va;
