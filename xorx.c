@@ -41,7 +41,7 @@ enum {
 	AUDIO_SOUNDS = 32, // number of sound effects
 
 	MAP_COLS = 256, // map width in tiles
-	MAP_ROWS = 256, // map height in tiles
+	MAP_ROWS = 128, // map height in tiles
 	VIEW_COLS = VIDEO_COLS, // view width in tiles
 	VIEW_ROWS = VIDEO_ROWS - 2, // view height in tiles
 };
@@ -52,9 +52,11 @@ enum {
 // define the tileset
 enum {
 	TILE_EMPTY = 0, // empty cell
+	// pickups
+	TILE_LIFE = 16, TILE_AMMO,
 	// walls, ruins
-	TILE_WALL_0 = 128, TILE_WALL_1, TILE_RUIN_0, TILE_RUIN_1,
-	TILE_TREE_0, TILE_TREE_1, TILE_GRASS_0, TILE_GRASS_1,
+	TILE_WALL_0 = 128, TILE_WALL_1, TILE_WALL_2, TILE_WALL_3, TILE_RUIN_0, TILE_RUIN_1,
+	TILE_TREE_0, TILE_TREE_1, TILE_TREE_2, TILE_TREE_3, TILE_GRASS_0, TILE_GRASS_1,
 	// liquid tiles
 	TILE_WATER_0, TILE_WATER_1, TILE_LAVA_0, TILE_LAVA_1,
 	// explosion + spawn cycles
@@ -192,11 +194,6 @@ static vec_t vec2(const int x, const int y) {
 	return (vec_t){ .x = x, .y = y };
 }
 
-// check if two vectors are equal
-static bool veq(const vec_t a, const vec_t b) {
-	return (a.x == b.x) && (a.y == b.y);
-}
-
 // add two vectors
 static vec_t vadd(const vec_t a, const vec_t b) {
 	return (vec_t){ .x = a.x + b.x, .y = a.y + b.y };
@@ -271,11 +268,6 @@ static _Noreturn void fail(const char *fmt, ...) {
 // check if vector is inside the world
 static bool inside(const vec_t v) {
 	return (v.x >= 0) && (v.x < MAP_COLS) && (v.y >= 0) && (v.y < MAP_ROWS);
-}
-
-// visible checks if vector is inside the visible area
-static bool visible(const vec_t v) {
-	return veq(vbase(v), vbase(state.game.player));
 }
 
 // nearby checks if two vectors are nearby
@@ -372,9 +364,8 @@ static bool try_move_player(const vec_t src, const dir_t dir) {
 
 // handle flying arrows
 static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
-	if (water) shape(src, TILE_WATER_0+rnd()%2, 4+rnd()%4); else clear(src);
+	if (water) shape(src, TILE_WATER_0+rnd()%2, 15+rnd()%8); else clear(src);
 	const vec_t dst = vmove(src, dir);
-	if (!visible(dst)) return;
 	const cell_t cell = get(dst);
 	switch (cell.tile) {
 		case TILE_EMPTY:
@@ -431,9 +422,9 @@ static void update_monster(const vec_t src, const uint8_t tile) {
 static void update_player(const vec_t src) {
 	const dir_t dir = input_dir();
 	if (btn(BUTTON_A)) {
-		if (state.game.ammo > 0) {
+		if ((dir != DIR_NONE) && (state.game.ammo > 0)) {
 			update_arrow(src, dir, false);
-			shape(src, TILE_PLAYER_SHOOT, 15);
+			shape(src, TILE_PLAYER_SHOOT, 8);
 			sound(SOUND_SHOOT);
 			state.game.ammo--;
 			return;
@@ -441,7 +432,8 @@ static void update_player(const vec_t src) {
 	} else {
 		if (try_move_player(src, dir)) {
 			state.game.player = vmove(src, dir);
-			shape(state.game.player, TILE_PLAYER_STAND, 8);
+			clear(src);
+			shape(state.game.player, TILE_PLAYER_STAND, 4);
 			sound(SOUND_PLAYER_MOVED);
 			return;
 		}
@@ -498,29 +490,13 @@ static void update_game(void) {
 	if (btnp(BUTTON_X)) state.game.paused = !state.game.paused;
 	if (state.game.paused) return;
 
-	// update the visible game world
-	const vec_t base = vbase(state.game.player);
-	for (int y = 0; y < VIEW_ROWS; ++y) {
-		for (int x = 0; x < VIEW_COLS; ++x) {
-			update_cell(vadd(base, vec2(x, y)));
+	// update whole game world (hmm...I want to update only the visible part but this has problems)
+	for (int y = 0; y < MAP_ROWS; ++y) {
+		for (int x = 0; x < MAP_COLS; ++x) {
+			update_cell(vec2(x, y));
 		}
 	}
-
-	// check if we have to hibernate the world
-	if (veq(base, vbase(state.game.player))) {
-		// still on same screen
-		state.game.tick++;
-	} else {
-		// crossed the screen ... hibernate all cells
-		for (int y = 0; y < VIEW_ROWS; ++y) {
-			for (int x = 0; x < VIEW_COLS; ++x) {
-				const vec_t v = vadd(base, vec2(x, y));
-				const cell_t cell = get(v);
-				put(v, (cell_t){ .tile = cell.tile, .tick = ((cell.tick + 256) - state.game.tick) % 256 });
-			}
-		}
-		state.game.tick = 0;
-	}
+	state.game.tick++;
 }
 
 // draw the whole game
@@ -533,11 +509,45 @@ static void draw_game(void) {
 			draw(x, y, cell.tile);
 		}
 	}
-	print(0, VIEW_ROWS, strf("(%d,%d)", state.game.player.x, state.game.player.y));
+	print(0, VIEW_ROWS + 1, strf("%c%-3d %c%-3d", TILE_LIFE, state.game.life, TILE_AMMO, state.game.ammo));
+	if (state.game.paused) print(0, VIEW_ROWS, "* PAUSED *");
+}
+
+// TEST: find random place
+static vec_t test_random_place(void) {
+	for (;;) {
+		const vec_t v = vec2(1+SDL_rand(MAP_COLS-1), 1+SDL_rand(MAP_ROWS-1));
+		if (get(v).tile == TILE_EMPTY) return v;
+	}
+}
+
+// TEST: generate some random level to test some gameplay
+static void test_create_random_world(void) {
+	SDL_zero(state.game.cells);
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_TREE_0+SDL_rand(4), 0);
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_GRASS_0+SDL_rand(2), 0);
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_RUIN_0+SDL_rand(2), 0);
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_WATER_0+SDL_rand(2), SDL_rand(8));
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_LAVA_0+SDL_rand(2), SDL_rand(8));
+	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_MONSTER_0+SDL_rand(4), SDL_rand(8));
+	for (int x = 0; x < MAP_COLS; ++x) {
+		shape(vec2(x, 0), TILE_WALL_0+SDL_rand(4), 0);
+		shape(vec2(x, MAP_ROWS-1), TILE_WALL_0+SDL_rand(4), 0);
+	}
+	for (int y = 0; y < MAP_ROWS; ++y) {
+		shape(vec2(0, y), TILE_WALL_0+SDL_rand(4), 0);
+		shape(vec2(MAP_COLS-1, y), TILE_WALL_0+SDL_rand(4), 0);
+	}
+	state.game.player = vec2(1, 1);
+	state.game.life = 100;
+	state.game.ammo = 100;
+	shape(state.game.player, TILE_PLAYER_STAND, 1);
+	state.game.paused = true;
 }
 
 // initialize the game
 static void on_init(void) {
+	test_create_random_world();
 }
 
 // run single game tick
