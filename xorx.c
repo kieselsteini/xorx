@@ -54,6 +54,16 @@ typedef enum btn_t {
 	BUTTON_UP = 16, BUTTON_DOWN = 32, BUTTON_LEFT = 64, BUTTON_RIGHT = 128
 } btn_t;
 
+// define directions (clock-wise)
+typedef enum dir_t {
+	DIR_NONE, DIR_NORTH, DIR_EAST, DIR_SOUTH, DIR_WEST
+} dir_t;
+
+// simple 2D vector
+typedef struct vec_t {
+	int x, y;
+} vec_t;
+
 // a sound effect loaded to memory
 typedef struct sound_t {
 	const int16_t *samples; // decoded 16-bit PCM sample data
@@ -121,6 +131,32 @@ static int maxi(const int a, const int b) {
 // return clamped integer
 static int clampi(const int x, const int min, const int max) {
 	return maxi(mini(x, max), min);
+}
+
+// shortcut to create 2D vector
+static vec_t vec2(const int x, const int y) {
+	return (vec_t){ .x = x, .y = y };
+}
+
+// add two vectors
+static vec_t vadd(const vec_t a, const vec_t b) {
+	return (vec_t){ .x = a.x + b.x, .y = a.y + b.y };
+}
+
+// subtract two vectors
+static vec_t vsub(const vec_t a, const vec_t b) {
+	return (vec_t){ .x = a.x - b.x, .y = a.y - b.y };
+}
+
+// return vector for given direction
+static vec_t vdir(const dir_t dir) {
+	static const vec_t v[] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+	return (dir >= DIR_NORTH) && (dir <= DIR_WEST) ? v[dir - 1] : (vec_t){};
+}
+
+// move vector one step in direction
+static vec_t vmove(const vec_t v, const dir_t d) {
+	return vadd(v, vdir(d));
 }
 
 // return formatted string printf-style
