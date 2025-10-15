@@ -53,7 +53,7 @@ enum {
 enum {
 	TILE_EMPTY = 0, // empty cell
 	// pickups
-	TILE_LIFE = 16, TILE_AMMO,
+	TILE_LIFE = 16, TILE_AMMO, TILE_FLASK,
 	// walls, ruins
 	TILE_WALL_0 = 128, TILE_WALL_1, TILE_WALL_2, TILE_WALL_3, TILE_RUIN_0, TILE_RUIN_1,
 	TILE_TREE_0, TILE_TREE_1, TILE_TREE_2, TILE_TREE_3, TILE_GRASS_0, TILE_GRASS_1,
@@ -76,6 +76,7 @@ enum {
 	SOUND_EXPLODE,
 	SOUND_SPAWN,
 	SOUND_SHOOT,
+	SOUND_PICKUP,
 	SOUND_ARROW_HIT,
 	SOUND_PLAYER_MOVED,
 	SOUND_PLAYER_HURT,
@@ -160,6 +161,7 @@ static struct state_t {
 		vec_t player; // current player position
 		int life; // current hitpoints
 		int ammo; // current ammunition
+		int flasks; // current amount of flasks
 		cell_t cells[MAP_ROWS][MAP_COLS]; // cells of our game world
 	} game;
 } state;
@@ -357,6 +359,17 @@ static bool try_move_player(const vec_t src, const dir_t dir) {
 			hurt();
 			explode(dst);
 			return false;
+		case TILE_LIFE:
+			state.game.life = mini(200, state.game.life + 25);
+			sound(SOUND_PICKUP);
+			return true;
+		case TILE_AMMO:
+			state.game.ammo = mini(200, state.game.ammo + 25);
+			sound(SOUND_PICKUP);
+			return true;
+		case TILE_FLASK:
+			state.game.flasks = mini(200, state.game.flasks + 1);
+			sound(SOUND_PICKUP);
 		default:
 			return false;
 	}
@@ -374,6 +387,10 @@ static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
 		case TILE_WATER_0:
 		case TILE_WATER_1:
 			shape(dst, TILE_ARROW_WATER_N + dir - 1, 3);
+			break;
+		case TILE_LAVA_0:
+		case TILE_LAVA_1:
+			explode(src);
 			break;
 		case TILE_RUIN_0:
 		case TILE_RUIN_1:
