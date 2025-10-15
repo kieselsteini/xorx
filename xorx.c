@@ -42,10 +42,36 @@ enum {
 
 	MAP_COLS = 256, // map width in tiles
 	MAP_ROWS = 256, // map height in tiles
+	VIEW_COLS = VIDEO_COLS, // view width in tiles
+	VIEW_ROWS = VIDEO_ROWS - 2, // view height in tiles
 };
 
 #define WINDOW_TITLE "Kingdom of Xorx" // title of the window
 #define WINDOW_SCALE 0.8f // scale window to the desktop size
+
+// define the tileset
+enum {
+	TILE_EMPTY = 0, // empty cell
+	// walls, ruins
+	TILE_WALL_0 = 128, TILE_WALL_1, TILE_RUIN_0, TILE_RUIN_1,
+	TILE_TREE_0, TILE_TREE_1, TILE_GRASS_0, TILE_GRASS_1,
+	// liquid tiles
+	TILE_WATER_0, TILE_WATER_1, TILE_LAVA_0, TILE_LAVA_1,
+	// explosion cycles
+	TILE_EXPLOSION_0, TILE_EXPLOSION_1, TILE_EXPLOSION_2, TILE_EXPLOSION_3,
+	// flying arrows (air + water)
+	TILE_ARROW_N, TILE_ARROW_E, TILE_ARROW_S, TILE_ARROW_W,
+	TILE_ARROW_WATER_N, TILE_ARROW_WATER_E, TILE_ARROW_WATER_S, TILE_ARROW_WATER_W,
+	// monster (levels)
+	TILE_MONSTER_0, TILE_MONSTER_1, TILE_MONSTER_2, TILE_MONSTER_3,
+};
+
+// define sound effects
+enum {
+	SOUND_EXPLODE,
+	SOUND_MONSTER_HURT,
+	SOUND_MONSTER_DIED,
+};
 
 // define button bit-masks
 typedef enum btn_t {
@@ -63,6 +89,12 @@ typedef enum dir_t {
 typedef struct vec_t {
 	int x, y;
 } vec_t;
+
+// simple cell on the world
+typedef struct cell_t {
+	uint8_t tile; // active visible tile on this spot
+	uint8_t tick; // when will this cell be active again
+} cell_t;
 
 // a sound effect loaded to memory
 typedef struct sound_t {
@@ -111,7 +143,11 @@ static struct state_t {
 	} video;
 	// game system
 	struct {
+		bool paused; // flag if we are paused
 		uint8_t rand; // current game random "seed"
+		uint8_t tick; // 8-bit game tick we use for cells
+		vec_t player; // current player positiion
+		cell_t cells[MAP_ROWS][MAP_COLS]; // cells of our game world
 	} game;
 } state;
 
@@ -145,6 +181,11 @@ static vec_t vec2(const int x, const int y) {
 	return (vec_t){ .x = x, .y = y };
 }
 
+// check if two vectors are equal
+static bool veq(const vec_t a, const vec_t b) {
+	return (a.x == b.x) && (a.y == b.y);
+}
+
 // add two vectors
 static vec_t vadd(const vec_t a, const vec_t b) {
 	return (vec_t){ .x = a.x + b.x, .y = a.y + b.y };
@@ -164,6 +205,11 @@ static vec_t vdir(const dir_t dir) {
 // move vector one step in direction
 static vec_t vmove(const vec_t v, const dir_t d) {
 	return vadd(v, vdir(d));
+}
+
+// normalize vector to view position
+static vec_t vbase(const vec_t v) {
+	return (vec_t){ .x = (v.x / VIEW_COLS) * VIEW_COLS, .y = (v.y / VIEW_ROWS) * VIEW_ROWS };
 }
 
 // check if button is down
@@ -211,8 +257,129 @@ static _Noreturn void fail(const char *fmt, ...) {
 	longjmp(state.core.error, 1);
 }
 
+// check if vector is inside the world
+static bool inside(const vec_t v) {
+	return (v.x >= 0) && (v.x < MAP_COLS) && (v.y >= 0) && (v.y < MAP_ROWS);
+}
+
+// visible checks if vector is inside the visible area
+static bool visible(const vec_t v) {
+	return veq(vbase(v), vbase(state.game.player));
+}
+
+// get a cell from the world
+static cell_t get(const vec_t v) {
+	return inside(v) ? state.game.cells[v.y][v.x] : (cell_t){}; // FIXME: return solid cell when outside
+}
+
+// put a cell to world
+static void put(const vec_t v, const cell_t c) {
+	if (inside(v)) state.game.cells[v.y][v.x] = c;
+}
+
+// clear will clear a cell
+static void clear(const vec_t v) {
+	put(v, (cell_t){});
+}
+
+// shape will shape a cell with tile and given ticks to activate again
+static void shape(const vec_t v, const uint8_t tile, const uint8_t ticks) {
+	put(v, (cell_t){ .tile = tile, .tick = ticks });
+}
+
+// explode a cell
+static void explode(const vec_t v) {
+	shape(v, TILE_EXPLOSION_0, 2);
+	sound(SOUND_EXPLODE);
+}
+
 
 //==[[ Gameplay Routines ]]=============================================================================================
+
+// handle flying arrows
+static void update_arrow(const vec_t src, const dir_t dir, const bool water) {
+	if (water) shape(src, TILE_WATER_0+rnd()%2, 4+rnd()%4); else clear(src);
+	const vec_t dst = vmove(src, dir);
+	if (!visible(dst)) return;
+	const cell_t cell = get(dst);
+	switch (cell.tile) {
+		case TILE_EMPTY:
+			shape(dst, TILE_ARROW_N + dir - 1, 3);
+			break;
+		case TILE_WATER_0:
+		case TILE_WATER_1:
+			shape(dst, TILE_ARROW_WATER_N + dir - 1, 3);
+			break;
+		case TILE_RUIN_0:
+		case TILE_RUIN_1:
+		case TILE_GRASS_0:
+		case TILE_GRASS_1:
+			explode(dst);
+			break;
+		case TILE_MONSTER_0:
+			explode(dst);
+			sound(SOUND_MONSTER_DIED);
+			break;
+		case TILE_MONSTER_1:
+		case TILE_MONSTER_2:
+		case TILE_MONSTER_3:
+			put(dst, (cell_t){ .tile = cell.tile - 1, .tick = cell.tick });
+			sound(SOUND_MONSTER_HURT);
+			break;
+	}
+}
+
+// handle single cell
+static void update_cell(const vec_t v) {
+	const cell_t cell = get(v);
+	if (cell.tick != state.game.tick) return;
+	switch (cell.tile) {
+		// handle flying arrows
+		case TILE_ARROW_N: update_arrow(v, DIR_NORTH, false); break;
+		case TILE_ARROW_E: update_arrow(v, DIR_EAST, false); break;
+		case TILE_ARROW_S: update_arrow(v, DIR_SOUTH, false); break;
+		case TILE_ARROW_W: update_arrow(v, DIR_WEST, false); break;
+		case TILE_ARROW_WATER_N: update_arrow(v, DIR_NORTH, true); break;
+		case TILE_ARROW_WATER_E: update_arrow(v, DIR_EAST, true); break;
+		case TILE_ARROW_WATER_S: update_arrow(v, DIR_SOUTH, true); break;
+		case TILE_ARROW_WATER_W: update_arrow(v, DIR_WEST, true); break;
+		// handle explosion cycles
+		case TILE_EXPLOSION_0: shape(v, TILE_EXPLOSION_1, 2); break;
+		case TILE_EXPLOSION_1: shape(v, TILE_EXPLOSION_2, 2); break;
+		case TILE_EXPLOSION_2: shape(v, TILE_EXPLOSION_3, 2); break;
+		case TILE_EXPLOSION_3: clear(v); break;
+		// handle liquids
+		case TILE_WATER_0: shape(v, TILE_WATER_1, 15+rnd()%8); break;
+		case TILE_WATER_1: shape(v, TILE_WATER_0, 15+rnd()%8); break;
+		case TILE_LAVA_0: shape(v, TILE_LAVA_0, 30+rnd()%8); break;
+		case TILE_LAVA_1: shape(v, TILE_LAVA_1, 30+rnd()%8); break;
+	}
+}
+
+// update the whole game
+static void update_game(void) {
+	if (btnp(BUTTON_X)) state.game.paused = !state.game.paused;
+	if (state.game.paused) return;
+	const vec_t base = vbase(state.game.player);
+	for (int y = 0; y < VIEW_ROWS; ++y) {
+		for (int x = 0; x < VIEW_COLS; ++x) {
+			update_cell(vadd(base, vec2(x, y)));
+		}
+	}
+}
+
+// draw the whole game
+static void draw_game(void) {
+	cls();
+	const vec_t base = vbase(state.game.player);
+	for (int y = 0; y < VIEW_ROWS; ++y) {
+		for (int x = 0; x < VIEW_COLS; ++x) {
+			const cell_t cell = get(vadd(base, vec2(x, y)));
+			draw(x, y, cell.tile);
+		}
+	}
+	print(0, VIEW_ROWS, strf("(%d,%d)", state.game.player.x, state.game.player.y));
+}
 
 // initialize the game
 static void on_init(void) {
@@ -220,6 +387,8 @@ static void on_init(void) {
 
 // run single game tick
 static void on_tick(void) {
+	update_game();
+	draw_game();
 }
 
 
