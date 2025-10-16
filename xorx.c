@@ -40,10 +40,8 @@ enum {
 	AUDIO_VOICES = 4, // amount of parallel sound effects
 	AUDIO_SOUNDS = 32, // number of sound effects
 
-	MAP_COLS = 256, // map width in tiles
-	MAP_ROWS = 128, // map height in tiles
-	VIEW_COLS = VIDEO_COLS, // view width in tiles
-	VIEW_ROWS = VIDEO_ROWS - 2, // view height in tiles
+	MAP_COLS = VIDEO_COLS, // map width in tiles
+	MAP_ROWS = VIDEO_ROWS - 2, // map height in tiles
 };
 
 #define WINDOW_TITLE "Kingdom of Xorx" // title of the window
@@ -126,6 +124,7 @@ static struct state_t {
 	struct {
 		bool running; // keep the engine running
 		jmp_buf error; // error handling routine
+		const char *levels; // loaded level data
 	} core;
 	// time system
 	struct {
@@ -154,7 +153,7 @@ static struct state_t {
 		uint8_t data[VIDEO_ROWS][VIDEO_COLS]; // screen content data
 	} video;
 	// game system
-	struct {
+	struct game_t {
 		bool paused; // flag if we are paused
 		uint8_t rand; // current game random "seed"
 		uint8_t tick; // 8-bit game tick we use for cells
@@ -163,9 +162,12 @@ static struct state_t {
 		int ammo; // current ammunition
 		int flasks; // current amount of flasks
 		cell_t cells[MAP_ROWS][MAP_COLS]; // cells of our game world
+		const char *level; // current reading position in the levels
 	} game;
 } state;
 
+// define invalid position vector
+static const vec_t invalid_position = {-1, -1};
 
 //==[[ Various Routines ]]==============================================================================================
 
@@ -215,11 +217,6 @@ static vec_t vdir(const dir_t dir) {
 // move vector one step in direction
 static vec_t vmove(const vec_t v, const dir_t d) {
 	return vadd(v, vdir(d));
-}
-
-// normalize vector to view position
-static vec_t vbase(const vec_t v) {
-	return (vec_t){ .x = (v.x / VIEW_COLS) * VIEW_COLS, .y = (v.y / VIEW_ROWS) * VIEW_ROWS };
 }
 
 // check if button is down
@@ -332,6 +329,55 @@ static dir_t chase_dir(const vec_t src, const vec_t dst) {
 
 //==[[ Gameplay Routines ]]=============================================================================================
 
+// next level will "load" the next level from the levels file
+static void next_level(void) {
+	memset(state.game.cells, 0, sizeof(state.game.cells));
+	state.game.rand = 0;
+	for (int y = 0; y < MAP_ROWS; ++y) {
+		for (int x = 0; x < MAP_COLS; ++x, ++state.game.level) {
+			const vec_t v = vec2(x, y);
+			const char ch = *state.game.level;
+			switch (ch) {
+				case 0: fail("Read beyond level end?!");
+				case '\n': goto next;
+				case '#': shape(v, TILE_WALL_0+rnd()%4, 0); break;
+				case '%': shape(v, TILE_RUIN_0+rnd()%2, 0); break;
+				case '&': shape(v, TILE_TREE_0+rnd()%2, 0); break;
+				case '|': shape(v, TILE_TREE_2+rnd()%2, 0); break;
+				case ',': shape(v, TILE_GRASS_0+rnd()%2, 0); break;
+				case '@': shape(v, TILE_PLAYER_STAND, 0); state.game.player = v; break;
+				case '+': shape(v, TILE_LIFE, 0); break;
+				case '/': shape(v, TILE_AMMO, 0); break;
+				case '!': shape(v, TILE_FLASK, 0); break;
+				case '~': shape(v, TILE_WATER_0+rnd()%2, 15+rnd()%8); break;
+				case 'l': shape(v, TILE_LAVA_0+rnd()%2, 30+rnd()%8); break;
+				case 'a': shape(v, TILE_MONSTER_0, 15); break;
+				case 'b': shape(v, TILE_MONSTER_1, 15); break;
+				case 'c': shape(v, TILE_MONSTER_2, 15); break;
+				case 'd': shape(v, TILE_MONSTER_3, 15); break;
+				default:
+					if (ch >= '0' && ch <= '9') shape(v, ch, 0);
+					if (ch >= 'A' && ch <= 'Z') shape(v, ch, 0);
+					break;
+			}
+		}
+		next:
+		while (*state.game.level && *state.game.level != '\n') ++state.game.level;
+		if (*state.game.level == '\n') ++state.game.level;
+	}
+}
+
+// start new game will start a completely new game
+static void start_game(void) {
+	state.game = (struct game_t){
+		.player = invalid_position,
+		.life = 3,
+		.ammo = 5,
+		.level = state.core.levels,
+	};
+	next_level();
+}
+
 // hurt will hurt the player
 static void hurt(void) {
 	if ((state.game.life -= 10) > 0) {
@@ -360,15 +406,15 @@ static bool try_move_player(const vec_t src, const dir_t dir) {
 			explode(dst);
 			return false;
 		case TILE_LIFE:
-			state.game.life = mini(200, state.game.life + 25);
+			state.game.life = mini(5, state.game.life + 1);
 			sound(SOUND_PICKUP);
 			return true;
 		case TILE_AMMO:
-			state.game.ammo = mini(200, state.game.ammo + 25);
+			state.game.ammo = mini(100, state.game.ammo + 5);
 			sound(SOUND_PICKUP);
 			return true;
 		case TILE_FLASK:
-			state.game.flasks = mini(200, state.game.flasks + 1);
+			state.game.flasks = mini(10, state.game.flasks + 1);
 			sound(SOUND_PICKUP);
 		default:
 			return false;
@@ -519,52 +565,20 @@ static void update_game(void) {
 // draw the whole game
 static void draw_game(void) {
 	cls();
-	const vec_t base = vbase(state.game.player);
-	for (int y = 0; y < VIEW_ROWS; ++y) {
-		for (int x = 0; x < VIEW_COLS; ++x) {
-			const cell_t cell = get(vadd(base, vec2(x, y)));
+	for (int y = 0; y < MAP_ROWS; ++y) {
+		for (int x = 0; x < MAP_COLS; ++x) {
+			const cell_t cell = get(vec2(x, y));
 			draw(x, y, cell.tile);
 		}
 	}
-	print(0, VIEW_ROWS + 1, strf("%c%-3d %c%-3d", TILE_LIFE, state.game.life, TILE_AMMO, state.game.ammo));
-	if (state.game.paused) print(0, VIEW_ROWS, "* PAUSED *");
-}
-
-// TEST: find random place
-static vec_t test_random_place(void) {
-	for (;;) {
-		const vec_t v = vec2(1+SDL_rand(MAP_COLS-1), 1+SDL_rand(MAP_ROWS-1));
-		if (get(v).tile == TILE_EMPTY) return v;
-	}
-}
-
-// TEST: generate some random level to test some gameplay
-static void test_create_random_world(void) {
-	SDL_zero(state.game.cells);
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_TREE_0+SDL_rand(4), 0);
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_GRASS_0+SDL_rand(2), 0);
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_RUIN_0+SDL_rand(2), 0);
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_WATER_0+SDL_rand(2), SDL_rand(8));
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_LAVA_0+SDL_rand(2), SDL_rand(8));
-	for (int i = 0; i < 1024; ++i) shape(test_random_place(), TILE_MONSTER_0+SDL_rand(4), SDL_rand(8));
-	for (int x = 0; x < MAP_COLS; ++x) {
-		shape(vec2(x, 0), TILE_WALL_0+SDL_rand(4), 0);
-		shape(vec2(x, MAP_ROWS-1), TILE_WALL_0+SDL_rand(4), 0);
-	}
-	for (int y = 0; y < MAP_ROWS; ++y) {
-		shape(vec2(0, y), TILE_WALL_0+SDL_rand(4), 0);
-		shape(vec2(MAP_COLS-1, y), TILE_WALL_0+SDL_rand(4), 0);
-	}
-	state.game.player = vec2(1, 1);
-	state.game.life = 100;
-	state.game.ammo = 100;
-	shape(state.game.player, TILE_PLAYER_STAND, 1);
-	state.game.paused = true;
+	print(0, MAP_ROWS + 1, strf("%c%-3d %c%-3d", TILE_LIFE, state.game.life, TILE_AMMO, state.game.ammo));
+	for (int x = 0; x < VIDEO_COLS; ++x) draw(x, MAP_ROWS, 1);
+	if (state.game.paused) print(VIDEO_COLS/2-6, MAP_ROWS, " * PAUSED * ");
 }
 
 // initialize the game
 static void on_init(void) {
-	test_create_random_world();
+	start_game();
 }
 
 // run single game tick
@@ -672,6 +686,11 @@ static void update_video(void) {
 	if (!SDL_RenderPresent(state.video.renderer)) fail("SDL_RenderPresent() error: %s", SDL_GetError());
 }
 
+// load level data
+static void load_levels(void) {
+	if (!(state.core.levels = SDL_LoadFile("levels.txt", NULL))) fail("Failed to load levels!");
+}
+
 // load tileset
 static SDL_Texture *load_tiles(const char *name) {
 	SDL_Surface *surface = SDL_LoadBMP(name);
@@ -727,6 +746,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 	if (!SDL_BindAudioStream(state.audio.device, state.audio.stream)) fail("SDL_BindAudioStream() error: %s", SDL_GetError());
 
 	// init assets
+	load_levels();
 	state.video.texture = load_tiles("tiles.bmp");
 	for (int i = 0; i < AUDIO_SOUNDS; ++i) state.audio.sounds[i] = load_sound(strf("sound%02d.wav", i));
 
@@ -751,6 +771,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
 	if (state.video.window) SDL_DestroyWindow(state.video.window);
 
 	// shutdown core system
+	if (state.core.levels) SDL_free((void*)state.core.levels);
 	SDL_Quit();
 }
 
