@@ -51,7 +51,7 @@ enum {
 enum {
 	TILE_EMPTY = 0, // empty cell
 	// pickups
-	TILE_LIFE = 16, TILE_AMMO, TILE_FLASK,
+	TILE_LIFE = 16, TILE_AMMO, TILE_FLASK, TILE_KEY,
 	// walls, ruins
 	TILE_WALL_0 = 128, TILE_WALL_1, TILE_WALL_2, TILE_WALL_3, TILE_RUIN_0, TILE_RUIN_1,
 	TILE_TREE_0, TILE_TREE_1, TILE_TREE_2, TILE_TREE_3, TILE_GRASS_0, TILE_GRASS_1,
@@ -66,7 +66,13 @@ enum {
 	// monster (levels)
 	TILE_MONSTER_0, TILE_MONSTER_1, TILE_MONSTER_2, TILE_MONSTER_3,
 	// player sprites
-	TILE_PLAYER_STAND, TILE_PLAYER_SHOOT, TILE_PLAYER_MAGIC, TILE_PLAYER_DEAD,
+	TILE_PLAYER_STAND, TILE_PLAYER_SHOOT, TILE_PLAYER_MAGIC, TILE_PLAYER_WON,
+	// campfire (level exit)
+	TILE_EXIT_0, TILE_EXIT_1,
+	// monster altair
+	TILE_NEST_0, TILE_NEST_1, TILE_NEST_2, TILE_NEST_3,
+	// boulder + door
+	TILE_BOULDER, TILE_DOOR,
 };
 
 // define sound effects
@@ -75,6 +81,7 @@ enum {
 	SOUND_SPAWN,
 	SOUND_SHOOT,
 	SOUND_PICKUP,
+	SOUND_WON,
 	SOUND_ARROW_HIT,
 	SOUND_PLAYER_MOVED,
 	SOUND_PLAYER_HURT,
@@ -161,6 +168,7 @@ static struct state_t {
 		int life; // current hitpoints
 		int ammo; // current ammunition
 		int flasks; // current amount of flasks
+		int keys; // current amount of keys
 		cell_t cells[MAP_ROWS][MAP_COLS]; // cells of our game world
 		const char *level; // current reading position in the levels
 	} game;
@@ -344,11 +352,15 @@ static void next_level(void) {
 				case '%': shape(v, TILE_RUIN_0+rnd()%2, 0); break;
 				case '&': shape(v, TILE_TREE_0+rnd()%2, 0); break;
 				case '|': shape(v, TILE_TREE_2+rnd()%2, 0); break;
-				case ',': shape(v, TILE_GRASS_0+rnd()%2, 0); break;
+				case ';': shape(v, TILE_GRASS_0+rnd()%2, 0); break;
 				case '@': shape(v, TILE_PLAYER_STAND, 0); state.game.player = v; break;
+				case 'x': shape(v, TILE_EXIT_0, 4); break;
+				case 'y': shape(v, TILE_PLAYER_WON, 0); break;
 				case '+': shape(v, TILE_LIFE, 0); break;
 				case '/': shape(v, TILE_AMMO, 0); break;
 				case '!': shape(v, TILE_FLASK, 0); break;
+				case 'k': shape(v, TILE_KEY, 0); break;
+				case 'o': shape(v, TILE_BOULDER, 0); break;
 				case '~': shape(v, TILE_WATER_0+rnd()%2, 15+rnd()%8); break;
 				case 'l': shape(v, TILE_LAVA_0+rnd()%2, 30+rnd()%8); break;
 				case 'a': shape(v, TILE_MONSTER_0, 15); break;
@@ -378,13 +390,38 @@ static void start_game(void) {
 	next_level();
 }
 
+// end the current level
+static void end_level(void) {
+	// set to won player state
+	shape(state.game.player, TILE_PLAYER_WON, 1);
+	state.game.player = invalid_position;
+	sound(SOUND_WON);
+	// eliminate all deadly things ...
+	for (int y = 0; y < MAP_ROWS; ++y) {
+		for (int x = 0; x < MAP_COLS; ++x) {
+			const vec_t v = vec2(x, y);
+			switch (get(v).tile) {
+				case TILE_MONSTER_0: case TILE_MONSTER_1: case TILE_MONSTER_2: case TILE_MONSTER_3:
+				case TILE_NEST_0: case TILE_NEST_1: case TILE_NEST_2: case TILE_NEST_3:
+				case TILE_SPAWN_0: case TILE_SPAWN_1: case TILE_SPAWN_2: case TILE_SPAWN_3:
+				case TILE_ARROW_N: case TILE_ARROW_E: case TILE_ARROW_S: case TILE_ARROW_W:
+					explode(v);
+					break;
+				case TILE_ARROW_WATER_N: case TILE_ARROW_WATER_E: case TILE_ARROW_WATER_S: case TILE_ARROW_WATER_W:
+					shape(v, TILE_WATER_0, 15);
+					break;
+			}
+		}
+	}
+}
+
 // hurt will hurt the player
 static void hurt(void) {
 	if ((state.game.life -= 10) > 0) {
 		sound(SOUND_PLAYER_HURT);
 	} else {
-		shape(state.game.player, TILE_PLAYER_DEAD, 0);
 		sound(SOUND_PLAYER_DIED);
+		explode(state.game.player);
 	}
 }
 
@@ -410,12 +447,19 @@ static bool try_move_player(const vec_t src, const dir_t dir) {
 			sound(SOUND_PICKUP);
 			return true;
 		case TILE_AMMO:
-			state.game.ammo = mini(100, state.game.ammo + 5);
+			state.game.ammo = mini(99, state.game.ammo + 5);
 			sound(SOUND_PICKUP);
 			return true;
 		case TILE_FLASK:
 			state.game.flasks = mini(10, state.game.flasks + 1);
 			sound(SOUND_PICKUP);
+		case TILE_KEY:
+			state.game.keys = mini(99, state.game.keys + 1);
+			sound(SOUND_PICKUP);
+		case TILE_EXIT_0:
+		case TILE_EXIT_1:
+			end_level();
+			return false;
 		default:
 			return false;
 	}
@@ -483,6 +527,7 @@ static void update_monster(const vec_t src, const uint8_t tile) {
 
 // update player
 static void update_player(const vec_t src) {
+	state.game.player = src;
 	const dir_t dir = input_dir();
 	if (btn(BUTTON_A)) {
 		if ((dir != DIR_NONE) && (state.game.ammo > 0)) {
@@ -502,8 +547,13 @@ static void update_player(const vec_t src) {
 		}
 	}
 	// we stay at the same position, and wait for input next tick
-	state.game.player = src;
-	shape(src, TILE_PLAYER_STAND, 1);
+	shape(state.game.player, TILE_PLAYER_STAND, 1);
+}
+
+// update player in won state
+static void update_player_won(const vec_t v) {
+	shape(v, TILE_PLAYER_WON, 1);
+	if (btnp(BUTTON_ANY)) next_level();
 }
 
 // handle single cell
@@ -515,6 +565,7 @@ static void update_cell(const vec_t v) {
 		case TILE_PLAYER_STAND: update_player(v); break;
 		case TILE_PLAYER_SHOOT: update_player(v); break;
 		case TILE_PLAYER_MAGIC: update_player(v); break;
+		case TILE_PLAYER_WON: update_player_won(v); break;
 		// handle monsters
 		case TILE_MONSTER_0: update_monster(v, TILE_MONSTER_0); break;
 		case TILE_MONSTER_1: update_monster(v, TILE_MONSTER_1); break;
@@ -544,6 +595,9 @@ static void update_cell(const vec_t v) {
 		case TILE_WATER_1: shape(v, TILE_WATER_0, 15+rnd()%8); break;
 		case TILE_LAVA_0: shape(v, TILE_LAVA_0, 30+rnd()%8); break;
 		case TILE_LAVA_1: shape(v, TILE_LAVA_1, 30+rnd()%8); break;
+		// handle exit
+		case TILE_EXIT_0: shape(v, TILE_EXIT_1, 6); break;
+		case TILE_EXIT_1: shape(v, TILE_EXIT_0, 6); break;
 	}
 }
 
@@ -571,9 +625,19 @@ static void draw_game(void) {
 			draw(x, y, cell.tile);
 		}
 	}
-	print(0, MAP_ROWS + 1, strf("%c%-3d %c%-3d", TILE_LIFE, state.game.life, TILE_AMMO, state.game.ammo));
 	for (int x = 0; x < VIDEO_COLS; ++x) draw(x, MAP_ROWS, 1);
-	if (state.game.paused) print(VIDEO_COLS/2-6, MAP_ROWS, " * PAUSED * ");
+	if (state.game.paused) {
+		print(VIDEO_COLS/2-5, MAP_ROWS, "* PAUSED *");
+	} else if (inside(state.game.player)) {
+		print(0, MAP_ROWS + 1, strf("%c%-2d %c%-2d %c%-2d %c%-2d",
+			TILE_LIFE, state.game.life,
+			TILE_AMMO, state.game.ammo,
+			TILE_FLASK, state.game.flasks,
+			TILE_KEY, state.game.keys
+		));
+	} else {
+		print(0, MAP_ROWS + 1, "* PRESS ANY BUTTON TO CONTINUE *");
+	}
 }
 
 // initialize the game
