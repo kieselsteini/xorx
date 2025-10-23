@@ -866,6 +866,23 @@ static void on_tick(void) {
 
 //==[[ Core Engine Routines ]]==========================================================================================
 
+// screenshot will take a screenshot
+static void screenshot(void) {
+	SDL_Surface *tileset = SDL_LoadBMP("tiles.bmp");
+	SDL_Surface *surface = SDL_CreateSurface(VIDEO_WIDTH * 3, VIDEO_HEIGHT * 3, SDL_PIXELFORMAT_RGB24);
+	for (int y = 0; y < VIDEO_ROWS; ++y) {
+		for (int x = 0; x < VIDEO_COLS; ++x) {
+			const unsigned int tile = state.video.data[y][x];
+			const SDL_Rect src = { .x = (tile % 16) * TILE_WIDTH, .y = (tile / 16) * TILE_HEIGHT, .w = TILE_WIDTH, .h = TILE_HEIGHT };
+			const SDL_Rect dst = { .x = x * TILE_WIDTH * 3, .y = y * TILE_HEIGHT * 3, .w = TILE_WIDTH * 3, .h = TILE_HEIGHT * 3 };
+			SDL_BlitSurfaceScaled(tileset, &src, surface, &dst, SDL_SCALEMODE_NEAREST);
+		}
+	}
+	SDL_SaveBMP(surface, "screenshot.bmp");
+	SDL_DestroySurface(surface);
+	SDL_DestroySurface(tileset);
+}
+
 // press will set/unset a button
 static void press(const btn_t mask, const bool down) {
 	if (down) state.input.down |= mask; else state.input.down &= ~mask;
@@ -875,6 +892,7 @@ static void press(const btn_t mask, const bool down) {
 static void handle_keyboard(const SDL_Keycode key, const bool down) {
 	switch (key) {
 		case SDLK_ESCAPE: if (down) state.core.running = false; break;
+		case SDLK_F12: if (down) screenshot(); break;
 		case SDLK_W: case SDLK_8: case SDLK_KP_8: case SDLK_UP: press(BUTTON_UP, down); break;
 		case SDLK_S: case SDLK_2: case SDLK_KP_2: case SDLK_DOWN: press(BUTTON_DOWN, down); break;
 		case SDLK_A: case SDLK_4: case SDLK_KP_4: case SDLK_LEFT: press(BUTTON_LEFT, down); break;

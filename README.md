@@ -2,6 +2,8 @@
 ## Overview
 This is a very small action/adventure game, where you explore a "large" world, encounter foes and puzzles.
 
+![Screenshot of the game](doc/screenshot1.png)
+
 ## World Format
 The whole world is stored in a BMP file called `world.bmp`. The color of every pixel denotes a single cell in the game.
 The size of the bitmap is 512 x 256 pixels, which is the excat size of the game world. You see always an area of 32x16 pixels/cells.
