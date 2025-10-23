@@ -9,22 +9,22 @@ The size of the bitmap is 512 x 256 pixels, which is the excat size of the game 
 ### Color Codes
 | Color | Description |
 | --- | --- |
-| #000000 | Free space. |
-| #4e4a4e | Solid wall, cannot be destroyed by any means. |
-| #70402a | Breakable wall, can be destroyed by arrows. |
-| #004000 | Trees, cannot be destroyed by any means. |
-| #4a2a1b | Dead trees, cannot be destroyed by any means. |
-| #008000 | Grass. Player destroys it on touch. |
-| #000096 | Water. Blocks movement, but allows arrows/bolts to fly over. Boulders will destroy water. |
-| #8595a1 | Boulder. Can be pushed by player to empty spaces, water or monsters. |
-| #ffffff | Player start position. There should be only **ONE** pixel of this kind! |
-| #400000 | Monster Level 1. Deals 1 damage. Will be destroyed by arrows / player. |
-| #800000 | Monster Level 2. Deals 2 damage. Will be destroyed by player. Arrow will degrade it to level 1. |
-| #c00000 | Monster Level 3. Deals 3 damage. Will be destroyed by player. Arrow will degrade it to level 2. |
-| #ff0000 | Monster Level 4. Deals 4 damage. Will be destroyed by player. Arrow will degrade it to level 3. |
-| #ff8000 | Bolt Trap. Shoots bolts in all 4 directions in a regular interval. |
-| #ff6400 | Monster Shrine. Spawns random monster in regular intervals in a random direction. You can make it less dangerous, if you block some sides. |
-| #6dc2ca | Teleporter. Player will be teleported to corresponding teleporter. |
+| `#000000` | Free space. |
+| `#4e4a4e` | Solid wall, cannot be destroyed by any means. |
+| `#70402a` | Breakable wall, can be destroyed by arrows. |
+| `#004000` | Trees, cannot be destroyed by any means. |
+| `#4a2a1b` | Dead trees, cannot be destroyed by any means. |
+| `#008000` | Grass. Player destroys it on touch. |
+| `#000096` | Water. Blocks movement, but allows arrows/bolts to fly over. Boulders will destroy water. |
+| `#8595a1` | Boulder. Can be pushed by player to empty spaces, water or monsters. |
+| `#ffffff` | Player start position. There should be only **ONE** pixel of this kind! |
+| `#400000` | Monster Level 1. Deals 1 damage. Will be destroyed by arrows / player. |
+| `#800000` | Monster Level 2. Deals 2 damage. Will be destroyed by player. Arrow will degrade it to level 1. |
+| `#c00000` | Monster Level 3. Deals 3 damage. Will be destroyed by player. Arrow will degrade it to level 2. |
+| `#ff0000` | Monster Level 4. Deals 4 damage. Will be destroyed by player. Arrow will degrade it to level 3. |
+| `#ff8000` | Bolt Trap. Shoots bolts in all 4 directions in a regular interval. |
+| `#ff6400` | Monster Shrine. Spawns random monster in regular intervals in a random direction. You can make it less dangerous, if you block some sides. |
+| `#6dc2ca` | Teleporter. Player will be teleported to corresponding teleporter. |
 
 ### Teleporters
 Teleporters are a bit tricky to get used to. If a player touches a teleporter, it will scan in the direction the player moved until it finds another teleporter. Then will place the player one cell adhead in that direction. Think of a pipe in a straight line. You enter the pipe on one end, and leave it at the other end.
