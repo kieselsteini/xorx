@@ -67,3 +67,24 @@ Not yet :)
 - using SDL3 storage system for cross-plattform compatible directories to store savegames
 - some kind of intro screen
 - replays
+
+## Credits
+Here I list all the work which is not done by me.
+
+### 16-color palette
+The games uses the 16 Color DawnBringer palette.
+
+### Sound Effects
+
+| Sound | Source |
+| --- | --- |
+| sound02.wav | Free Fantasy SFX Pack By TomMusic |
+| sound07.wav | Free Fantasy SFX Pack By TomMusic |
+| sound09.wav | Super Dialogue Audio Pack V1 |
+| sound10.wav | Super Dialogue Audio Pack V1 |
+| sound13.wav | Free Fantasy SFX Pack By TomMusic |
+
+#### Super Dialogue Audio Pack V1
+Super Dialogue Audio Pack V1
+Produced by Dillon Becker (dillonbecker.com)
+These files are licensed under Attribution 4.0 International (CC BY 4.0)

@@ -37,7 +37,7 @@ enum {
 
 	AUDIO_RATE = 22050, // audio mixing rate
 	AUDIO_BUFFER = 1024 * 2, // audio mixer buffer in samples
-	AUDIO_VOICES = 4, // amount of parallel sound effects
+	AUDIO_VOICES = 8, // amount of parallel sound effects
 	AUDIO_SOUNDS = 32, // number of sound effects
 
 	MAP_COLS = 512, // map width in tiles
@@ -104,6 +104,7 @@ enum {
 	SOUND_PLAYER_DIED,
 	SOUND_MONSTER_HURT,
 	SOUND_MONSTER_DIED,
+	SOUND_SHOOT_BOLT,
 };
 
 // define button bit-masks
@@ -590,6 +591,7 @@ static void update_bolt_trap(const vec_t src, const cell_t cell) {
 	if (cell.tile == TILE_BOLT_TRAP_0) {
 		shape(src, TILE_BOLT_TRAP_1, 4);
 	} else {
+		sound(SOUND_SHOOT_BOLT);
 		for (dir_t dir = DIR_NORTH; dir <= DIR_WEST; ++dir) update_bolt(src, dir, false);
 		shape(src, TILE_BOLT_TRAP_0, 30-4);
 	}
